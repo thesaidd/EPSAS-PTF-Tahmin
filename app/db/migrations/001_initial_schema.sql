@@ -44,18 +44,57 @@ SELECT create_hypertable(
 );
 
 CREATE TABLE IF NOT EXISTS features_ptf_hourly (
-    delivery_time TIMESTAMPTZ NOT NULL,
-    feature_set_version VARCHAR(64) NOT NULL,
-    features JSONB NOT NULL,
+    "timestamp" TIMESTAMPTZ NOT NULL,
+    target_ptf NUMERIC NOT NULL,
+    hour INTEGER,
+    day_of_week INTEGER,
+    day_of_month INTEGER,
+    day_of_year INTEGER,
+    week_of_year INTEGER,
+    month INTEGER,
+    quarter INTEGER,
+    year INTEGER,
+    is_weekend BOOLEAN,
+    is_month_start BOOLEAN,
+    is_month_end BOOLEAN,
+    is_peak_hour BOOLEAN,
+    is_business_hour BOOLEAN,
+    season TEXT,
+    ptf_lag_1 NUMERIC,
+    ptf_lag_2 NUMERIC,
+    ptf_lag_3 NUMERIC,
+    ptf_lag_24 NUMERIC,
+    ptf_lag_48 NUMERIC,
+    ptf_lag_72 NUMERIC,
+    ptf_lag_168 NUMERIC,
+    ptf_24h_mean NUMERIC,
+    ptf_24h_std NUMERIC,
+    ptf_24h_min NUMERIC,
+    ptf_24h_max NUMERIC,
+    ptf_7d_mean NUMERIC,
+    ptf_7d_std NUMERIC,
+    ptf_7d_min NUMERIC,
+    ptf_7d_max NUMERIC,
+    ptf_30d_mean NUMERIC,
+    ptf_30d_std NUMERIC,
+    ptf_diff_1 NUMERIC,
+    ptf_diff_24 NUMERIC,
+    ptf_pct_change_1 NUMERIC,
+    ptf_pct_change_24 NUMERIC,
+    feature_version TEXT NOT NULL DEFAULT 'v1',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    PRIMARY KEY (delivery_time, feature_set_version)
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY ("timestamp")
 );
 
 SELECT create_hypertable(
     'features_ptf_hourly',
-    'delivery_time',
+    'timestamp',
     if_not_exists => TRUE
 );
+
+CREATE INDEX IF NOT EXISTS ix_features_ptf_hourly_version_timestamp
+    ON features_ptf_hourly (feature_version, "timestamp" DESC);
 
 CREATE TABLE IF NOT EXISTS model_predictions (
     forecast_time TIMESTAMPTZ NOT NULL,

@@ -205,6 +205,59 @@ unless EPİAŞ operational guidance requires a smaller window; multi-year ranges
 can make many requests and should be run from the CLI rather than an HTTP
 request.
 
+## PTF Feature Engineering
+
+The feature pipeline reads normalized hourly prices from `ptf_hourly` and
+upserts typed, ML-ready rows into `features_ptf_hourly`. It creates Istanbul
+calendar indicators, hourly and weekly lags, rolling price statistics, and
+price-change features. A range build loads 30 days of earlier source history so
+the first requested timestamp can use available lag and rolling context.
+
+Build all available PTF features:
+
+```bash
+docker compose exec api python scripts/build_ptf_features.py \
+  --feature-version v1
+```
+
+Build a selected date range:
+
+```bash
+docker compose exec api python scripts/build_ptf_features.py \
+  --start-date 2020-01-01 \
+  --end-date 2026-07-09 \
+  --feature-version v1
+```
+
+The same build is available through `POST /api/features/ptf/build` in FastAPI
+Swagger at <http://localhost:8000/docs>:
+
+```json
+{
+  "start_date": "2020-01-01",
+  "end_date": "2026-07-09",
+  "feature_version": "v1"
+}
+```
+
+Check feature status:
+
+```bash
+curl http://localhost:8000/api/features/ptf/status
+```
+
+Verify the feature row count directly:
+
+```bash
+docker compose exec db sh -c \
+  'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+  -c "SELECT COUNT(*) FROM features_ptf_hourly;"'
+```
+
+All rolling statistics are computed from `target_ptf.shift(1)` before applying
+the window. This deliberately excludes the current hour's target and prevents
+target leakage into model inputs.
+
 ## MLflow database separation
 
 Application time-series tables and MLflow metadata use separate PostgreSQL
