@@ -8,6 +8,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-pepias}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pepias}
       POSTGRES_DB: ${POSTGRES_DB:-pepias}
+      MLFLOW_DATABASE: ${MLFLOW_DATABASE:-mlflow}
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
@@ -22,6 +23,24 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+
+  db-init:
+    image: timescale/timescaledb:latest-pg16
+    restart: "no"
+    environment:
+      PGHOST: db
+      PGPASSWORD: ${POSTGRES_PASSWORD:-pepias}
+      POSTGRES_USER: ${POSTGRES_USER:-pepias}
+      POSTGRES_DB: ${POSTGRES_DB:-pepias}
+      MLFLOW_DATABASE: ${MLFLOW_DATABASE:-mlflow}
+    volumes:
+      - ./app/db/migrations:/docker-entrypoint-initdb.d:ro
+    command:
+      - sh
+      - /docker-entrypoint-initdb.d/000_create_mlflow_database.sh
+    depends_on:
+      db:
+        condition: service_healthy
 
   api:
     build:
@@ -83,7 +102,7 @@ services:
       - --port
       - "5000"
       - --backend-store-uri
-      - ${MLFLOW_BACKEND_STORE_URI:-postgresql+psycopg://pepias:pepias@db:5432/pepias}
+      - ${MLFLOW_BACKEND_STORE_URI:-postgresql+psycopg2://pepias:pepias@db:5432/mlflow}
       - --artifacts-destination
       - /mlartifacts
       - --serve-artifacts
@@ -92,8 +111,33 @@ services:
     volumes:
       - mlflow_artifacts:/mlartifacts
     depends_on:
-      db:
-        condition: service_healthy
+      mlflow-db-upgrade:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  mlflow-db-upgrade:
+    build:
+      context: .
+      target: mlflow
+    restart: "no"
+    environment:
+      MLFLOW_BACKEND_STORE_URI: ${MLFLOW_BACKEND_STORE_URI:-postgresql+psycopg2://pepias:pepias@db:5432/mlflow}
+    command:
+      - python
+      - scripts/prepare_mlflow_database.py
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
 
 volumes:
   postgres_data:

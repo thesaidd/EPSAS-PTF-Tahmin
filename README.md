@@ -83,13 +83,14 @@ Copy `.env.example` to `.env` and adjust values as needed.
 | `POSTGRES_PASSWORD` | PostgreSQL password | `pepias` |
 | `POSTGRES_DB` | PostgreSQL database | `pepias` |
 | `DATABASE_URL` | SQLAlchemy-compatible database URL | Compose database URL |
+| `MLFLOW_DATABASE` | Dedicated PostgreSQL database for MLflow metadata | `mlflow` |
 | `POSTGRES_PORT` | Host PostgreSQL port | `5432` |
 | `API_PORT` | Host FastAPI port | `8000` |
 | `STREAMLIT_PORT` | Host Streamlit port | `8501` |
 | `MLFLOW_PORT` | Host MLflow port | `5000` |
 | `API_URL` | Internal API URL used by Streamlit | `http://api:8000` |
 | `MLFLOW_TRACKING_URI` | MLflow tracking URI used by application code | `http://mlflow:5000` |
-| `MLFLOW_BACKEND_STORE_URI` | PostgreSQL URI used for MLflow metadata | Compose database URL |
+| `MLFLOW_BACKEND_STORE_URI` | Dedicated PostgreSQL URI used for MLflow metadata | `postgresql+psycopg2://pepias:pepias@db:5432/mlflow` |
 | `EPIAS_BASE_URL` | EPİAŞ Transparency Platform base URL | `https://seffaflik.epias.com.tr` |
 | `EPIAS_AUTH_URL` | EPİAŞ authentication service base URL | `https://giris.epias.com.tr` |
 | `EPIAS_USERNAME` | EPİAŞ account username | Empty |
@@ -146,13 +147,47 @@ docker compose exec db psql -U pepias -d pepias \
 Fresh database volumes run both initialization files automatically. Full
 historical PTF ingestion is intentionally deferred to Sprint 3.
 
+## MLflow database separation
+
+Application time-series tables and MLflow metadata use separate PostgreSQL
+databases on the same server:
+
+- `POSTGRES_DB` (`pepias` by default) contains application tables such as
+  `raw_epias_responses` and `ptf_hourly`.
+- `MLFLOW_DATABASE` (`mlflow` by default) contains only MLflow experiments,
+  runs, metrics, parameters, and registry metadata.
+
+The `db-init` Compose service creates the MLflow database idempotently, including
+when an existing PostgreSQL volume is reused. The `mlflow-db-upgrade` service
+then initializes a fresh MLflow schema or upgrades an existing schema before the
+tracking server starts. MLflow uses the psycopg2 SQLAlchemy driver for
+compatibility with the integer experiment IDs in MLflow 2.22; the FastAPI
+application continues to use psycopg v3.
+
+Existing MLflow tables in the application database are not deleted or modified.
+They are retained as old local metadata but are no longer queried by the MLflow
+server. A volume reset is therefore not required.
+
+If a disposable local environment still contains incompatible state and none of
+its PostgreSQL or MLflow artifact data needs to be preserved, it can be reset
+explicitly:
+
+```bash
+docker compose down -v
+docker compose up --build
+```
+
+This command permanently removes all local application data, MLflow metadata,
+and stored artifacts. Back up or export anything important first.
+
 ## Database initialization
 
 On the first database startup,
-the SQL files under `app/db/migrations` enable TimescaleDB, create the initial
-tables, and convert time-indexed tables to hypertables. Docker's PostgreSQL
-initialization mechanism runs these files only when the database volume is
-empty.
+the initialization files under `app/db/migrations` create the dedicated MLflow
+database, enable TimescaleDB, create the application tables, and convert
+time-indexed tables to hypertables. Docker's PostgreSQL initialization mechanism
+runs these files only when the database volume is empty; `db-init` separately
+ensures the MLflow database exists for reused volumes.
 
 ## Run tests locally
 
