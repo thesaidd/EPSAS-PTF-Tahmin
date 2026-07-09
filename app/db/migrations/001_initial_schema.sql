@@ -2,18 +2,26 @@ CREATE EXTENSION IF NOT EXISTS timescaledb;
 
 CREATE TABLE IF NOT EXISTS raw_epias_responses (
     id BIGSERIAL NOT NULL,
-    endpoint VARCHAR(255) NOT NULL,
-    requested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    response_status INTEGER,
-    request_payload JSONB,
-    response_payload JSONB NOT NULL,
+    endpoint_name VARCHAR(255) NOT NULL,
+    endpoint_url TEXT NOT NULL,
+    request_payload JSONB NOT NULL,
+    response_json JSONB NOT NULL,
+    status_code INTEGER NOT NULL,
+    fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    data_start_date DATE,
+    data_end_date DATE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    PRIMARY KEY (id, requested_at)
+    PRIMARY KEY (id, fetched_at),
+    CHECK (
+        data_start_date IS NULL
+        OR data_end_date IS NULL
+        OR data_start_date <= data_end_date
+    )
 );
 
 SELECT create_hypertable(
     'raw_epias_responses',
-    'requested_at',
+    'fetched_at',
     if_not_exists => TRUE
 );
 
@@ -97,4 +105,3 @@ SELECT create_hypertable(
     'evaluation_time',
     if_not_exists => TRUE
 );
-

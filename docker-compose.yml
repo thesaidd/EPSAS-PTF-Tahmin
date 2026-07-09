@@ -34,6 +34,12 @@ services:
       ENVIRONMENT: ${ENVIRONMENT:-development}
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://pepias:pepias@db:5432/pepias}
       MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI:-http://mlflow:5000}
+      EPIAS_BASE_URL: ${EPIAS_BASE_URL:-https://seffaflik.epias.com.tr}
+      EPIAS_AUTH_URL: ${EPIAS_AUTH_URL:-https://giris.epias.com.tr}
+      EPIAS_USERNAME: ${EPIAS_USERNAME:-}
+      EPIAS_PASSWORD: ${EPIAS_PASSWORD:-}
+      EPIAS_REQUEST_TIMEOUT: ${EPIAS_REQUEST_TIMEOUT:-30}
+      EPIAS_MAX_RETRIES: ${EPIAS_MAX_RETRIES:-3}
     ports:
       - "${API_PORT:-8000}:8000"
     depends_on:
