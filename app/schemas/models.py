@@ -1,6 +1,7 @@
 from datetime import date, datetime
+from typing import Any
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, ConfigDict, model_validator
 
 
 class BaselineEvaluationRequest(BaseModel):
@@ -49,3 +50,57 @@ class BaselineStatusResponse(BaseModel):
     available_models: list[str]
     latest_metrics: dict[str, BaselineMetricValues]
 
+
+class XGBoostTrainingRequest(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
+    train_start: date | None = None
+    train_end: date | None = None
+    test_start: date | None = None
+    test_end: date | None = None
+    model_version: str = "xgboost_v1"
+    feature_version: str = "v1"
+
+    @model_validator(mode="after")
+    def validate_date_ranges(self) -> "XGBoostTrainingRequest":
+        if (
+            self.train_start is not None
+            and self.train_end is not None
+            and self.train_end < self.train_start
+        ):
+            raise ValueError("train_end must be on or after train_start")
+        if (
+            self.test_start is not None
+            and self.test_end is not None
+            and self.test_end < self.test_start
+        ):
+            raise ValueError("test_end must be on or after test_start")
+        return self
+
+
+class XGBoostTrainingSummary(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
+    training_run_id: str
+    model_version: str
+    train_start: str
+    train_end: str
+    test_start: str
+    test_end: str | None
+    train_rows: int
+    test_rows: int
+    metrics: BaselineMetricValues | dict[str, Any]
+    baseline_comparison: dict[str, Any]
+    artifact_path: str | None
+    warnings: list[str]
+    errors: list[str]
+
+
+class XGBoostStatusResponse(BaseModel):
+    total_prediction_rows: int
+    total_metric_rows: int
+    latest_training_run_id: str | None
+    latest_created_at: datetime | None
+    available_model_versions: list[str]
+    latest_metrics: BaselineMetricValues | None
+    latest_baseline_comparison: dict[str, Any] | None

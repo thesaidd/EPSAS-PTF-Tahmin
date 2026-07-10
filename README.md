@@ -306,8 +306,84 @@ docker compose exec db sh -c \
 
 Each successful evaluation is also logged to the
 `ptf_baseline_forecasting` MLflow experiment when MLflow is available. Database
-results remain valid if MLflow is temporarily unavailable. XGBoost will be
-implemented only after these benchmark results are established.
+results remain valid if MLflow is temporarily unavailable.
+
+## XGBoost PTF Forecasting
+
+The XGBoost point-forecasting pipeline trains an `XGBRegressor` on
+`features_ptf_hourly` with a chronological train/test split. It uses numeric and
+boolean feature columns, one-hot encodes `season`, drops rows missing key lag
+features, excludes current-target-derived change columns to avoid leakage, and
+never randomly shuffles time-series data.
+
+Default split:
+
+- Train: 2020-01-01 through 2023-12-31
+- Test: 2024-01-01 through the latest available feature timestamp
+
+Train from the CLI with defaults:
+
+```bash
+docker compose exec api python scripts/train_xgboost_ptf.py
+```
+
+Train a selected interval:
+
+```bash
+docker compose exec api python scripts/train_xgboost_ptf.py \
+  --train-start 2020-01-01 \
+  --train-end 2023-12-31 \
+  --test-start 2024-01-01 \
+  --test-end 2026-07-09 \
+  --model-version xgboost_v1
+```
+
+The API operation is available as `POST /api/models/xgboost/ptf/train` in
+FastAPI Swagger at <http://localhost:8000/docs>:
+
+```json
+{
+  "train_start": "2020-01-01",
+  "train_end": "2023-12-31",
+  "test_start": "2024-01-01",
+  "test_end": "2026-07-09",
+  "model_version": "xgboost_v1",
+  "feature_version": "v1"
+}
+```
+
+Check training status:
+
+```bash
+curl http://localhost:8000/api/models/xgboost/ptf/status
+```
+
+Inspect stored metrics directly:
+
+```bash
+docker compose exec db sh -c \
+  'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+  -c "SELECT training_run_id, model_version, mae, rmse, mape, smape, r2, count, \
+             baseline_comparison \
+      FROM xgboost_metrics ORDER BY created_at DESC LIMIT 5;"'
+```
+
+Each successful run stores hourly test predictions in `xgboost_predictions`,
+summary metrics in `xgboost_metrics`, and a native model artifact under:
+
+```text
+artifacts/models/ptf/xgboost/{model_version}/{training_run_id}/model.json
+```
+
+Artifacts are ignored by Git. Runs are also logged to the
+`ptf_xgboost_forecasting` MLflow experiment when MLflow is available. If MLflow
+is temporarily unavailable, training still persists database metrics and the
+local model artifact.
+
+The XGBoost summary compares MAE against the latest baseline evaluation and
+returns the best baseline model plus the percentage MAE improvement. Gaussian
+Process residual uncertainty modeling is intentionally not implemented yet; it
+is the next modeling sprint after point forecasting.
 
 ## MLflow database separation
 
@@ -376,9 +452,9 @@ pytest
 1. Implement historical PTF ingestion using the EPİAŞ client.
 2. Add schema validation, data-quality checks, and scheduled jobs.
 3. Build leakage-safe hourly features and reproducible training datasets.
-4. Train and track an XGBoost point-forecasting baseline in MLflow.
+4. Train and track an XGBoost point-forecasting model in MLflow.
 5. Model residual uncertainty with Gaussian Process Regression.
-6. Add versioned forecast endpoints, model loading, and prediction persistence.
+6. Add production day-ahead forecast endpoints and model loading.
 7. Expand the dashboard with forecast curves, confidence intervals, and model
    monitoring.
 8. Add CI, automated migrations, observability, secrets management, and
