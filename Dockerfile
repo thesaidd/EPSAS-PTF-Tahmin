@@ -8,6 +8,7 @@ WORKDIR /workspace
 
 COPY requirements.txt .
 RUN pip install --upgrade pip && pip install -r requirements.txt
+RUN pip install plotly==5.24.1
 
 COPY . .
 
@@ -22,4 +23,3 @@ CMD ["streamlit", "run", "dashboard/streamlit_app.py", "--server.address=0.0.0.0
 FROM base AS mlflow
 EXPOSE 5000
 CMD ["mlflow", "server", "--host", "0.0.0.0", "--port", "5000", "--backend-store-uri", "sqlite:////mlflow/mlflow.db", "--artifacts-destination", "/mlartifacts", "--serve-artifacts"]
-

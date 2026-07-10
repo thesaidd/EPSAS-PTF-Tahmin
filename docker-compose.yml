@@ -116,6 +116,12 @@ services:
     restart: unless-stopped
     environment:
       API_URL: ${API_URL:-http://api:8000}
+      POSTGRES_HOST: ${POSTGRES_HOST:-db}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_USER: ${POSTGRES_USER:-pepias}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pepias}
+      POSTGRES_DB: ${POSTGRES_DB:-pepias}
+      PYTHONPATH: /workspace
     ports:
       - "${STREAMLIT_PORT:-8501}:8501"
     depends_on:

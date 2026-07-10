@@ -582,6 +582,51 @@ docker compose exec db sh -c \
 For the current model findings, the expected selected point model is `xgboost`
 because GPR correction did not beat XGBoost on the same residual test window.
 
+## Streamlit Forecast Dashboard
+
+The Streamlit dashboard visualizes the latest production-ready forecast output
+from the forecast decision layer. It is read-only and uses:
+
+- `forecast_decision_metrics` for selected model, decision reason, and headline
+  metrics.
+- `forecast_decision_predictions` for actual PTF, selected prediction,
+  confidence bounds, risk levels, and recent forecast rows.
+
+Open the dashboard after starting Docker Compose:
+
+```bash
+docker compose up -d --build
+```
+
+Dashboard URL:
+
+```text
+http://localhost:8501
+```
+
+The dashboard shows:
+
+- selected production point forecast vs actual PTF;
+- 95% confidence interval as a visual band;
+- selected model and decision reason;
+- XGBoost vs GPR comparison JSON;
+- MAE, RMSE, R², interval coverage, interval width, row count, and evaluation
+  window;
+- risk-level distribution, average absolute error by risk level, and interval
+  width by risk level;
+- recent forecast table with readable Europe/Istanbul timestamps.
+
+If the dashboard is empty, generate the model outputs in order:
+
+```bash
+docker compose exec api python scripts/train_xgboost_ptf.py
+docker compose exec api python scripts/train_gpr_residual_ptf.py --max-train-rows 1000
+docker compose exec api python scripts/run_forecast_decision_ptf.py
+```
+
+For the current MVP results, the dashboard should show `xgboost` as the selected
+point model while still using GPR uncertainty intervals and `risk_level`.
+
 ## MLflow database separation
 
 Application time-series tables and MLflow metadata use separate PostgreSQL
