@@ -104,3 +104,81 @@ class XGBoostStatusResponse(BaseModel):
     available_model_versions: list[str]
     latest_metrics: BaselineMetricValues | None
     latest_baseline_comparison: dict[str, Any] | None
+
+
+class UncertaintyMetricValues(BaseModel):
+    interval_coverage_95: float | None
+    mean_interval_width: float | None
+    median_interval_width: float | None
+    low_risk_count: int
+    medium_risk_count: int
+    high_risk_count: int
+
+
+class GprResidualTrainingRequest(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
+    xgboost_training_run_id: str | None = None
+    residual_train_start: date | None = None
+    residual_train_end: date | None = None
+    residual_test_start: date | None = None
+    residual_test_end: date | None = None
+    model_version: str = "gpr_residual_v1"
+    max_train_rows: int = 3000
+
+    @model_validator(mode="after")
+    def validate_request(self) -> "GprResidualTrainingRequest":
+        if self.max_train_rows <= 0:
+            raise ValueError("max_train_rows must be positive")
+        if (
+            self.residual_train_start is not None
+            and self.residual_train_end is not None
+            and self.residual_train_end < self.residual_train_start
+        ):
+            raise ValueError(
+                "residual_train_end must be on or after residual_train_start"
+            )
+        if (
+            self.residual_test_start is not None
+            and self.residual_test_end is not None
+            and self.residual_test_end < self.residual_test_start
+        ):
+            raise ValueError(
+                "residual_test_end must be on or after residual_test_start"
+            )
+        return self
+
+
+class GprResidualTrainingSummary(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
+    gpr_run_id: str
+    xgboost_training_run_id: str
+    model_version: str
+    residual_train_start: str
+    residual_train_end: str
+    residual_test_start: str
+    residual_test_end: str
+    train_rows: int
+    test_rows: int
+    max_train_rows: int
+    metrics: BaselineMetricValues | dict[str, Any]
+    uncertainty_metrics: UncertaintyMetricValues | dict[str, Any]
+    xgboost_comparison: dict[str, Any]
+    baseline_comparison: dict[str, Any]
+    artifact_path: str | None
+    warnings: list[str]
+    errors: list[str]
+
+
+class GprResidualStatusResponse(BaseModel):
+    total_prediction_rows: int
+    total_metric_rows: int
+    latest_gpr_run_id: str | None
+    latest_created_at: datetime | None
+    available_model_versions: list[str]
+    latest_metrics: BaselineMetricValues | None
+    latest_uncertainty_metrics: UncertaintyMetricValues | None
+    latest_xgboost_comparison: dict[str, Any] | None
+    latest_baseline_comparison: dict[str, Any] | None
+    latest_artifact_path: str | None

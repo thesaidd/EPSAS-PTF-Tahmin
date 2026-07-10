@@ -381,9 +381,121 @@ is temporarily unavailable, training still persists database metrics and the
 local model artifact.
 
 The XGBoost summary compares MAE against the latest baseline evaluation and
-returns the best baseline model plus the percentage MAE improvement. Gaussian
-Process residual uncertainty modeling is intentionally not implemented yet; it
-is the next modeling sprint after point forecasting.
+returns the best baseline model plus the percentage MAE improvement. The GPR
+residual layer below uses these XGBoost predictions as its point-forecast input.
+
+## GPR Residual Uncertainty Modeling
+
+The GPR residual model is a second-stage uncertainty layer on top of XGBoost. It
+does not replace or retrain XGBoost. Instead, it learns recent XGBoost residuals:
+
+```text
+residual = actual - xgboost_prediction
+```
+
+For each evaluated timestamp, the GPR model estimates:
+
+- `residual_mean`
+- `residual_std`
+
+The corrected point forecast is:
+
+```text
+final_prediction = xgboost_prediction + residual_mean
+```
+
+The current 95% interval is:
+
+```text
+lower_bound_95 = final_prediction - 1.96 * residual_std
+upper_bound_95 = final_prediction + 1.96 * residual_std
+```
+
+Risk levels are assigned from interval width percentiles within the evaluation
+set:
+
+- `LOW`: width <= 50th percentile
+- `MEDIUM`: 50th percentile < width <= 85th percentile
+- `HIGH`: width > 85th percentile
+
+Train the residual model from the CLI using the latest successful XGBoost run:
+
+```bash
+docker compose exec api python scripts/train_gpr_residual_ptf.py \
+  --residual-train-start 2024-01-01 \
+  --residual-train-end 2025-12-31 \
+  --residual-test-start 2026-01-01 \
+  --residual-test-end 2026-07-09 \
+  --model-version gpr_residual_v1 \
+  --max-train-rows 3000
+```
+
+Train against a specific XGBoost training run:
+
+```bash
+docker compose exec api python scripts/train_gpr_residual_ptf.py \
+  --xgboost-training-run-id <xgboost-training-run-id> \
+  --max-train-rows 3000
+```
+
+The API operation is available as
+`POST /api/models/gpr-residual/ptf/train` in FastAPI Swagger at
+<http://localhost:8000/docs>:
+
+```json
+{
+  "xgboost_training_run_id": null,
+  "residual_train_start": "2024-01-01",
+  "residual_train_end": "2025-12-31",
+  "residual_test_start": "2026-01-01",
+  "residual_test_end": "2026-07-09",
+  "model_version": "gpr_residual_v1",
+  "max_train_rows": 3000
+}
+```
+
+Check GPR residual status:
+
+```bash
+curl http://localhost:8000/api/models/gpr-residual/ptf/status
+```
+
+Inspect stored metrics:
+
+```bash
+docker compose exec db sh -c \
+  'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+  -c "SELECT gpr_run_id, mae, rmse, r2, interval_coverage_95, \
+             mean_interval_width, xgboost_comparison, baseline_comparison, \
+             artifact_path \
+      FROM gpr_residual_metrics ORDER BY created_at DESC LIMIT 5;"'
+```
+
+Inspect sample predictions with intervals and risk levels:
+
+```bash
+docker compose exec db sh -c \
+  'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+  -c "SELECT timestamp, xgboost_prediction, residual_mean, residual_std, \
+             final_prediction, lower_bound_95, upper_bound_95, risk_level \
+      FROM gpr_residual_predictions \
+      ORDER BY created_at DESC, timestamp LIMIT 10;"'
+```
+
+Each successful run stores interval predictions in `gpr_residual_predictions`,
+summary metrics in `gpr_residual_metrics`, and a joblib artifact under:
+
+```text
+artifacts/models/ptf/gpr_residual/{model_version}/{gpr_run_id}/model.joblib
+```
+
+Artifacts are ignored by Git. Runs are also logged to the
+`ptf_gpr_residual_forecasting` MLflow experiment when MLflow is available.
+
+GPR correction is evaluated fairly against XGBoost on the same residual test
+window. In early MVP runs, the uncertainty layer may improve interval/risk
+visibility without improving point MAE; the `xgboost_comparison` JSON makes this
+explicit.
 
 ## MLflow database separation
 

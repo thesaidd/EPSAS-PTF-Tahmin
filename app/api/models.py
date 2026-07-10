@@ -5,11 +5,15 @@ from app.schemas.models import (
     BaselineEvaluationRequest,
     BaselineEvaluationSummary,
     BaselineStatusResponse,
+    GprResidualStatusResponse,
+    GprResidualTrainingRequest,
+    GprResidualTrainingSummary,
     XGBoostStatusResponse,
     XGBoostTrainingRequest,
     XGBoostTrainingSummary,
 )
 from ml.models.baseline_ptf import BaselinePtfService
+from ml.models.gpr_residual_ptf import GprResidualPtfService
 from ml.models.xgboost_ptf import XGBoostPtfService
 
 router = APIRouter(prefix="/api/models", tags=["models"])
@@ -21,6 +25,10 @@ def get_baseline_ptf_service() -> BaselinePtfService:
 
 def get_xgboost_ptf_service() -> XGBoostPtfService:
     return XGBoostPtfService()
+
+
+def get_gpr_residual_ptf_service() -> GprResidualPtfService:
+    return GprResidualPtfService()
 
 
 @router.post("/baseline/ptf/run", response_model=BaselineEvaluationSummary)
@@ -86,4 +94,46 @@ def xgboost_ptf_status(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Could not query XGBoost training status.",
+        ) from exc
+
+
+@router.post(
+    "/gpr-residual/ptf/train",
+    response_model=GprResidualTrainingSummary,
+)
+def train_gpr_residual_ptf(
+    request: GprResidualTrainingRequest,
+    service: GprResidualPtfService = Depends(get_gpr_residual_ptf_service),
+) -> GprResidualTrainingSummary:
+    try:
+        summary = service.run_residual_modeling(
+            xgboost_training_run_id=request.xgboost_training_run_id,
+            residual_train_start=request.residual_train_start,
+            residual_train_end=request.residual_train_end,
+            residual_test_start=request.residual_test_start,
+            residual_test_end=request.residual_test_end,
+            model_version=request.model_version,
+            max_train_rows=request.max_train_rows,
+        )
+        return GprResidualTrainingSummary.model_validate(summary)
+    except (RuntimeError, SQLAlchemyError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
+        ) from exc
+
+
+@router.get(
+    "/gpr-residual/ptf/status",
+    response_model=GprResidualStatusResponse,
+)
+def gpr_residual_ptf_status(
+    service: GprResidualPtfService = Depends(get_gpr_residual_ptf_service),
+) -> GprResidualStatusResponse:
+    try:
+        return GprResidualStatusResponse.model_validate(service.get_status())
+    except SQLAlchemyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Could not query GPR residual modeling status.",
         ) from exc
