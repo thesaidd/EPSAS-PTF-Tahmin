@@ -11,11 +11,13 @@ import pandas as pd
 import streamlit as st
 
 from dashboard.components import (
+    create_day_ahead_forecast_figure,
     create_forecast_figure,
     create_interval_width_figure,
     create_risk_distribution_figure,
     create_risk_error_figure,
     format_metric_value,
+    prepare_day_ahead_table,
     prepare_prediction_table,
     readable_timestamp,
     to_istanbul_time,
@@ -24,6 +26,7 @@ from dashboard.data_access import (
     load_decision_metrics,
     load_decision_predictions,
     load_decision_runs,
+    load_latest_day_ahead_forecast,
 )
 
 st.set_page_config(
@@ -60,6 +63,11 @@ def cached_predictions(
     )
 
 
+@st.cache_data(ttl=60)
+def cached_latest_day_ahead_forecast() -> tuple[dict[str, Any] | None, pd.DataFrame]:
+    return load_latest_day_ahead_forecast()
+
+
 def show_metric_cards(metrics: dict[str, Any]) -> None:
     first = st.columns(4)
     first[0].metric("Selected model", str(metrics.get("selected_model", "—")))
@@ -84,9 +92,63 @@ def show_metric_cards(metrics: dict[str, Any]) -> None:
     )
 
 
+def show_day_ahead_forecast_section() -> None:
+    st.subheader("Day-ahead Forecast")
+    try:
+        summary, forecast_rows = cached_latest_day_ahead_forecast()
+    except Exception as exc:
+        st.error("Could not load latest day-ahead forecast.")
+        st.exception(exc)
+        return
+
+    if summary is None or forecast_rows.empty:
+        st.info(
+            "Generate a day-ahead forecast using "
+            "POST /api/forecasts/ptf/day-ahead/generate or the CLI script."
+        )
+        st.code(
+            "docker compose exec api python scripts/generate_day_ahead_ptf.py",
+            language="bash",
+        )
+        return
+
+    risk_counts = summary.get("risk_level_counts", {})
+    first = st.columns(4)
+    first[0].metric("Target date", str(summary.get("target_date", "—")))
+    first[1].metric("Generated at", readable_timestamp(summary.get("generated_at")))
+    first[2].metric("Mean forecast", format_metric_value(summary.get("mean_forecast")))
+    first[3].metric(
+        "Mean interval width",
+        format_metric_value(summary.get("mean_interval_width")),
+    )
+
+    second = st.columns(4)
+    second[0].metric("Min forecast", format_metric_value(summary.get("min_forecast")))
+    second[1].metric("Max forecast", format_metric_value(summary.get("max_forecast")))
+    second[2].metric(
+        "Risk counts",
+        f"L {risk_counts.get('LOW', 0)} / "
+        f"M {risk_counts.get('MEDIUM', 0)} / "
+        f"H {risk_counts.get('HIGH', 0)}",
+    )
+    second[3].metric("Selected model", str(summary.get("selected_model", "xgboost")))
+
+    st.plotly_chart(
+        create_day_ahead_forecast_figure(forecast_rows),
+        use_container_width=True,
+    )
+    st.dataframe(
+        prepare_day_ahead_table(forecast_rows),
+        use_container_width=True,
+        hide_index=True,
+    )
+
+
 def main() -> None:
     st.title("⚡ EPİAŞ PTF Forecast Dashboard")
     st.caption("Production-ready point forecast with uncertainty and risk bands")
+    show_day_ahead_forecast_section()
+    st.divider()
 
     try:
         runs = cached_decision_runs()

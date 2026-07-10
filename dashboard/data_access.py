@@ -73,6 +73,88 @@ def load_latest_decision_metrics() -> dict[str, Any] | None:
     return load_decision_metrics(str(runs.iloc[0]["decision_run_id"]))
 
 
+def load_latest_day_ahead_forecast() -> tuple[dict[str, Any] | None, pd.DataFrame]:
+    latest_query = """
+        SELECT forecast_run_id
+        FROM day_ahead_forecasts
+        ORDER BY generated_at DESC, id DESC
+        LIMIT 1
+    """
+    with get_db_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(latest_query)
+            latest = cursor.fetchone()
+
+    if latest is None:
+        return None, pd.DataFrame()
+
+    forecast_run_id = str(latest["forecast_run_id"])
+    rows = _fetch_all(
+        """
+        SELECT
+            forecast_run_id,
+            target_date,
+            "timestamp",
+            horizon_hour,
+            selected_model,
+            xgboost_prediction,
+            residual_mean,
+            residual_std,
+            forecast_ptf,
+            lower_bound_95,
+            upper_bound_95,
+            interval_width_95,
+            risk_level,
+            xgboost_training_run_id,
+            gpr_run_id,
+            decision_run_id,
+            model_version,
+            generation_method,
+            warnings,
+            generated_at
+        FROM day_ahead_forecasts
+        WHERE forecast_run_id = %(forecast_run_id)s
+        ORDER BY "timestamp"
+        """,
+        {"forecast_run_id": forecast_run_id},
+    )
+    dataframe = pd.DataFrame(rows)
+    if dataframe.empty:
+        return None, dataframe
+
+    dataframe["timestamp"] = pd.to_datetime(dataframe["timestamp"], utc=True)
+    for column in [
+        "xgboost_prediction",
+        "residual_mean",
+        "residual_std",
+        "forecast_ptf",
+        "lower_bound_95",
+        "upper_bound_95",
+        "interval_width_95",
+    ]:
+        dataframe[column] = pd.to_numeric(dataframe[column], errors="coerce")
+
+    risk_counts = dataframe["risk_level"].value_counts().to_dict()
+    summary = {
+        "forecast_run_id": forecast_run_id,
+        "target_date": dataframe.iloc[0]["target_date"],
+        "generated_at": dataframe.iloc[0]["generated_at"],
+        "model_version": dataframe.iloc[0]["model_version"],
+        "selected_model": dataframe.iloc[0]["selected_model"],
+        "rows": len(dataframe),
+        "mean_forecast": dataframe["forecast_ptf"].mean(),
+        "min_forecast": dataframe["forecast_ptf"].min(),
+        "max_forecast": dataframe["forecast_ptf"].max(),
+        "mean_interval_width": dataframe["interval_width_95"].mean(),
+        "risk_level_counts": {
+            "LOW": int(risk_counts.get("LOW", 0)),
+            "MEDIUM": int(risk_counts.get("MEDIUM", 0)),
+            "HIGH": int(risk_counts.get("HIGH", 0)),
+        },
+    }
+    return summary, dataframe
+
+
 def load_decision_metrics(decision_run_id: str) -> dict[str, Any] | None:
     query = """
         SELECT *

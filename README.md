@@ -582,6 +582,83 @@ docker compose exec db sh -c \
 For the current model findings, the expected selected point model is `xgboost`
 because GPR correction did not beat XGBoost on the same residual test window.
 
+## Day-ahead PTF Forecast
+
+Sprint 9 adds a forward-looking 24-hour forecast output layer for business
+users. This layer does not retrain XGBoost or GPR. It loads the latest saved
+XGBoost artifact, uses the latest GPR residual model for uncertainty when
+available, and stores generated forecasts in `day_ahead_forecasts`.
+
+The output includes:
+
+- delivery `timestamp`;
+- `forecast_ptf`;
+- `lower_bound_95` and `upper_bound_95`;
+- `risk_level`;
+- `selected_model`;
+- `model_version`;
+- `generated_at`.
+
+Generate a forecast through the API:
+
+```bash
+curl -X POST http://localhost:8000/api/forecasts/ptf/day-ahead/generate \
+  -H "Content-Type: application/json" \
+  -d '{"target_date": "2026-07-10", "horizon_hours": 24, "model_version": "day_ahead_v1"}'
+```
+
+If `target_date` is omitted, the service uses the day after the latest
+available `ptf_hourly` timestamp.
+
+Generate a forecast through the CLI:
+
+```bash
+docker compose exec api python scripts/generate_day_ahead_ptf.py
+docker compose exec api python scripts/generate_day_ahead_ptf.py \
+  --target-date 2026-07-10 \
+  --horizon-hours 24 \
+  --model-version day_ahead_v1
+```
+
+View the latest forecast:
+
+```bash
+curl http://localhost:8000/api/forecasts/ptf/day-ahead/latest
+```
+
+Check forecast output status:
+
+```bash
+curl http://localhost:8000/api/forecasts/ptf/day-ahead/status
+```
+
+Inspect stored rows:
+
+```bash
+docker compose exec db sh -c \
+  'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+  -c "SELECT forecast_run_id, target_date, timestamp, horizon_hour, \
+             forecast_ptf, lower_bound_95, upper_bound_95, risk_level, generated_at \
+      FROM day_ahead_forecasts \
+      ORDER BY generated_at DESC, timestamp LIMIT 24;"'
+```
+
+The dashboard shows the latest day-ahead forecast in the "Day-ahead Forecast"
+section at:
+
+```text
+http://localhost:8501
+```
+
+MVP limitations:
+
+- future actual PTF values are not available, so this is inference output, not
+  backtest evaluation;
+- future lag and rolling features are built from the latest known PTF history;
+- predicted PTF values are not recursively fed back into future lag features;
+- if the GPR artifact is unavailable, uncertainty falls back to historical
+  residual standard deviation and the API response includes a warning.
+
 ## Streamlit Forecast Dashboard
 
 The Streamlit dashboard visualizes the latest production-ready forecast output

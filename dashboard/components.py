@@ -10,6 +10,7 @@ NUMERIC_DISPLAY_COLUMNS = [
     "selected_prediction",
     "actual",
     "absolute_error",
+    "forecast_ptf",
     "lower_bound_95",
     "upper_bound_95",
     "interval_width_95",
@@ -62,6 +63,85 @@ def prepare_prediction_table(dataframe: pd.DataFrame) -> pd.DataFrame:
         "risk_level",
     ]
     return table[[column for column in columns if column in table.columns]]
+
+
+def prepare_day_ahead_table(dataframe: pd.DataFrame) -> pd.DataFrame:
+    if dataframe.empty:
+        return dataframe
+    table = dataframe.copy()
+    table["timestamp"] = table["timestamp"].apply(readable_timestamp)
+    for column in [
+        "forecast_ptf",
+        "lower_bound_95",
+        "upper_bound_95",
+        "interval_width_95",
+        "residual_std",
+    ]:
+        if column in table.columns:
+            table[column] = pd.to_numeric(table[column], errors="coerce").round(2)
+    columns = [
+        "horizon_hour",
+        "timestamp",
+        "forecast_ptf",
+        "lower_bound_95",
+        "upper_bound_95",
+        "interval_width_95",
+        "risk_level",
+        "selected_model",
+    ]
+    return table[[column for column in columns if column in table.columns]]
+
+
+def create_day_ahead_forecast_figure(dataframe: pd.DataFrame) -> go.Figure:
+    figure = go.Figure()
+    if dataframe.empty:
+        return figure
+
+    chart_frame = dataframe.copy()
+    chart_frame["timestamp_local"] = pd.to_datetime(
+        chart_frame["timestamp"],
+        utc=True,
+    ).dt.tz_convert(ISTANBUL_TIMEZONE)
+    figure.add_trace(
+        go.Scatter(
+            x=chart_frame["timestamp_local"],
+            y=chart_frame["upper_bound_95"],
+            mode="lines",
+            line={"width": 0},
+            name="Upper 95%",
+            hoverinfo="skip",
+            showlegend=False,
+        )
+    )
+    figure.add_trace(
+        go.Scatter(
+            x=chart_frame["timestamp_local"],
+            y=chart_frame["lower_bound_95"],
+            mode="lines",
+            fill="tonexty",
+            fillcolor="rgba(255, 127, 14, 0.18)",
+            line={"width": 0},
+            name="95% confidence interval",
+        )
+    )
+    figure.add_trace(
+        go.Scatter(
+            x=chart_frame["timestamp_local"],
+            y=chart_frame["forecast_ptf"],
+            mode="lines+markers",
+            line={"color": "#ff7f0e", "width": 2},
+            name="Day-ahead forecast",
+        )
+    )
+    figure.update_layout(
+        height=420,
+        margin={"l": 20, "r": 20, "t": 40, "b": 20},
+        hovermode="x unified",
+        xaxis_title="Delivery time (Europe/Istanbul)",
+        yaxis_title="PTF (TL/MWh)",
+        legend={"orientation": "h", "y": 1.08},
+    )
+    return figure
 
 
 def create_forecast_figure(dataframe: pd.DataFrame) -> go.Figure:
