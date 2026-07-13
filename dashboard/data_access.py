@@ -155,6 +155,76 @@ def load_latest_day_ahead_forecast() -> tuple[dict[str, Any] | None, pd.DataFram
     return summary, dataframe
 
 
+def load_latest_pipeline_run() -> dict[str, Any] | None:
+    query = """
+        SELECT *
+        FROM pipeline_runs
+        WHERE pipeline_name = 'daily_forecast'
+        ORDER BY started_at DESC, id DESC
+        LIMIT 1
+    """
+    rows = _fetch_all(query)
+    return rows[0] if rows else None
+
+
+def load_pipeline_runs(limit: int = 20) -> pd.DataFrame:
+    query = """
+        SELECT
+            pipeline_run_id,
+            pipeline_name,
+            status,
+            started_at,
+            finished_at,
+            target_date,
+            ingest_start_date,
+            ingest_end_date,
+            forecast_run_id,
+            steps,
+            warnings,
+            errors
+        FROM pipeline_runs
+        WHERE pipeline_name = 'daily_forecast'
+        ORDER BY started_at DESC, id DESC
+        LIMIT %(limit)s
+    """
+    rows = _fetch_all(query, {"limit": int(limit)})
+    return pd.DataFrame(rows)
+
+
+def load_latest_monitoring_snapshot() -> dict[str, Any] | None:
+    query = """
+        SELECT *
+        FROM monitoring_snapshots
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1
+    """
+    rows = _fetch_all(query)
+    return rows[0] if rows else None
+
+
+def load_monitoring_snapshots(limit: int = 20) -> pd.DataFrame:
+    query = """
+        SELECT
+            snapshot_id,
+            status,
+            created_at,
+            data_freshness,
+            data_quality,
+            pipeline_health,
+            forecast_health,
+            model_quality,
+            uncertainty_quality,
+            risk_summary,
+            warnings,
+            errors
+        FROM monitoring_snapshots
+        ORDER BY created_at DESC, id DESC
+        LIMIT %(limit)s
+    """
+    rows = _fetch_all(query, {"limit": int(limit)})
+    return pd.DataFrame(rows)
+
+
 def load_decision_metrics(decision_run_id: str) -> dict[str, Any] | None:
     query = """
         SELECT *

@@ -27,6 +27,8 @@ from dashboard.data_access import (
     load_decision_predictions,
     load_decision_runs,
     load_latest_day_ahead_forecast,
+    load_latest_monitoring_snapshot,
+    load_latest_pipeline_run,
 )
 
 st.set_page_config(
@@ -68,6 +70,16 @@ def cached_latest_day_ahead_forecast() -> tuple[dict[str, Any] | None, pd.DataFr
     return load_latest_day_ahead_forecast()
 
 
+@st.cache_data(ttl=60)
+def cached_latest_pipeline_run() -> dict[str, Any] | None:
+    return load_latest_pipeline_run()
+
+
+@st.cache_data(ttl=60)
+def cached_latest_monitoring_snapshot() -> dict[str, Any] | None:
+    return load_latest_monitoring_snapshot()
+
+
 def show_metric_cards(metrics: dict[str, Any]) -> None:
     first = st.columns(4)
     first[0].metric("Selected model", str(metrics.get("selected_model", "—")))
@@ -90,6 +102,158 @@ def show_metric_cards(metrics: dict[str, Any]) -> None:
         f"{readable_timestamp(metrics.get('evaluation_start'))} → "
         f"{readable_timestamp(metrics.get('evaluation_end'))}",
     )
+
+
+def show_monitoring_quality_section() -> None:
+    st.subheader("Monitoring & Quality")
+    try:
+        snapshot = cached_latest_monitoring_snapshot()
+    except Exception as exc:
+        st.error("Could not load latest monitoring snapshot.")
+        st.exception(exc)
+        return
+
+    if not snapshot:
+        st.info(
+            "Generate monitoring snapshot using "
+            "POST /api/monitoring/ptf/snapshot or the CLI."
+        )
+        st.code(
+            "docker compose exec api python scripts/build_monitoring_snapshot.py",
+            language="bash",
+        )
+        return
+
+    status = str(snapshot.get("status", "—"))
+    status_method = {
+        "HEALTHY": st.success,
+        "WARNING": st.warning,
+        "CRITICAL": st.error,
+    }.get(status, st.info)
+    status_method(f"Overall monitoring status: {status}")
+
+    first = st.columns(4)
+    first[0].metric("Created", readable_timestamp(snapshot.get("created_at")))
+    first[1].metric(
+        "Latest PTF",
+        readable_timestamp((snapshot.get("data_freshness") or {}).get("max_timestamp")),
+    )
+    first[2].metric(
+        "Pipeline",
+        str((snapshot.get("pipeline_health") or {}).get("latest_status", "—")),
+    )
+    first[3].metric(
+        "Forecast rows",
+        format_metric_value(
+            (snapshot.get("forecast_health") or {}).get("latest_rows"),
+            decimals=0,
+        ),
+    )
+
+    second = st.columns(4)
+    second[0].metric(
+        "Model R²",
+        format_metric_value((snapshot.get("model_quality") or {}).get("r2"), decimals=3),
+    )
+    second[1].metric(
+        "Model MAE",
+        format_metric_value((snapshot.get("model_quality") or {}).get("mae")),
+    )
+    second[2].metric(
+        "95% coverage",
+        format_metric_value(
+            (snapshot.get("uncertainty_quality") or {}).get("interval_coverage_95"),
+            suffix="%",
+        ),
+    )
+    second[3].metric(
+        "High-risk hours",
+        format_metric_value(
+            (snapshot.get("risk_summary") or {}).get("high_risk_hours"),
+            decimals=0,
+        ),
+    )
+
+    section_rows = []
+    for section_name in [
+        "data_freshness",
+        "data_quality",
+        "pipeline_health",
+        "forecast_health",
+        "model_quality",
+        "uncertainty_quality",
+        "risk_summary",
+    ]:
+        section = snapshot.get(section_name) or {}
+        section_rows.append(
+            {
+                "section": section_name,
+                "status": section.get("status"),
+                "warnings": len(section.get("warnings") or []),
+                "errors": len(section.get("errors") or []),
+            }
+        )
+    st.dataframe(pd.DataFrame(section_rows), use_container_width=True, hide_index=True)
+
+    if snapshot.get("warnings"):
+        with st.expander("Monitoring warnings"):
+            st.json(snapshot.get("warnings"))
+    if snapshot.get("errors"):
+        with st.expander("Monitoring errors"):
+            st.json(snapshot.get("errors"))
+
+
+def show_pipeline_status_section() -> None:
+    st.subheader("Pipeline Status")
+    try:
+        pipeline_run = cached_latest_pipeline_run()
+    except Exception as exc:
+        st.error("Could not load latest daily forecast pipeline status.")
+        st.exception(exc)
+        return
+
+    if not pipeline_run:
+        st.info(
+            "No daily forecast pipeline run found yet. Run it from the API or CLI."
+        )
+        st.code(
+            "docker compose exec api python scripts/run_daily_forecast_pipeline.py --skip-ingestion --skip-feature-build",
+            language="bash",
+        )
+        return
+
+    first = st.columns(4)
+    first[0].metric("Status", str(pipeline_run.get("status", "—")))
+    first[1].metric("Target date", str(pipeline_run.get("target_date", "—")))
+    first[2].metric("Started", readable_timestamp(pipeline_run.get("started_at")))
+    first[3].metric("Finished", readable_timestamp(pipeline_run.get("finished_at")))
+
+    st.write(f"Forecast run: `{pipeline_run.get('forecast_run_id') or '—'}`")
+    steps = pipeline_run.get("steps") or {}
+    if steps:
+        step_rows = [
+            {
+                "step": step_name,
+                "status": step_payload.get("status"),
+                "details": {
+                    key: value
+                    for key, value in step_payload.items()
+                    if key not in {"status", "warnings", "errors"}
+                },
+            }
+            for step_name, step_payload in steps.items()
+            if isinstance(step_payload, dict)
+        ]
+        st.dataframe(pd.DataFrame(step_rows), use_container_width=True, hide_index=True)
+
+    warnings = pipeline_run.get("warnings") or []
+    errors = pipeline_run.get("errors") or []
+    if warnings:
+        with st.expander("Pipeline warnings"):
+            st.json(warnings)
+    if errors:
+        with st.expander("Pipeline errors"):
+            st.json(errors)
 
 
 def show_day_ahead_forecast_section() -> None:
@@ -147,6 +311,10 @@ def show_day_ahead_forecast_section() -> None:
 def main() -> None:
     st.title("⚡ EPİAŞ PTF Forecast Dashboard")
     st.caption("Production-ready point forecast with uncertainty and risk bands")
+    show_monitoring_quality_section()
+    st.divider()
+    show_pipeline_status_section()
+    st.divider()
     show_day_ahead_forecast_section()
     st.divider()
 

@@ -659,6 +659,180 @@ MVP limitations:
 - if the GPR artifact is unavailable, uncertainty falls back to historical
   residual standard deviation and the API response includes a warning.
 
+## Daily Forecast Pipeline
+
+Sprint 10 adds a lightweight operational pipeline for keeping the day-ahead
+forecast output fresh. It does not retrain XGBoost or GPR.
+
+The daily pipeline runs these steps:
+
+1. ingest recent PTF data from EPİAŞ for a configurable date window;
+2. rebuild/update PTF features for that same window;
+3. generate a 24-hour day-ahead forecast;
+4. persist run metadata and step-level status in `pipeline_runs`.
+
+Run the pipeline through the API:
+
+```bash
+curl -X POST http://localhost:8000/api/pipelines/daily-forecast/run \
+  -H "Content-Type: application/json" \
+  -d '{"target_date": null, "ingest_start_date": null, "ingest_end_date": null, "skip_ingestion": false, "skip_feature_build": false}'
+```
+
+For local testing without EPİAŞ credentials, use existing local data and skip
+the ingestion/feature steps:
+
+```bash
+curl -X POST http://localhost:8000/api/pipelines/daily-forecast/run \
+  -H "Content-Type: application/json" \
+  -d '{"skip_ingestion": true, "skip_feature_build": true}'
+```
+
+Check latest pipeline status:
+
+```bash
+curl http://localhost:8000/api/pipelines/daily-forecast/status
+```
+
+List recent pipeline runs:
+
+```bash
+curl http://localhost:8000/api/pipelines/daily-forecast/runs
+```
+
+Run the pipeline through the CLI:
+
+```bash
+docker compose exec api python scripts/run_daily_forecast_pipeline.py
+docker compose exec api python scripts/run_daily_forecast_pipeline.py --target-date 2026-07-11
+docker compose exec api python scripts/run_daily_forecast_pipeline.py --skip-ingestion --skip-feature-build
+```
+
+Inspect stored pipeline metadata:
+
+```bash
+docker compose exec db sh -c \
+  'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+  -c "SELECT pipeline_run_id, status, target_date, ingest_start_date, \
+             ingest_end_date, forecast_run_id, started_at, finished_at \
+      FROM pipeline_runs ORDER BY started_at DESC LIMIT 10;"'
+```
+
+The dashboard shows the latest pipeline status in the "Pipeline Status" section
+at:
+
+```text
+http://localhost:8501
+```
+
+Optional scheduler:
+
+The Compose file includes a disabled-by-default scheduler service under the
+`scheduler` profile. It runs `scripts/scheduled_daily_forecast_loop.py` once per
+day at the configured local time.
+
+Environment variables:
+
+```bash
+DAILY_PIPELINE_ENABLED=false
+DAILY_PIPELINE_RUN_TIME_LOCAL=13:00
+DAILY_PIPELINE_TIMEZONE=Europe/Istanbul
+```
+
+Start it explicitly only when desired:
+
+```bash
+docker compose --profile scheduler up -d daily-pipeline-scheduler
+```
+
+Current limitations:
+
+- model retraining is not part of the daily pipeline yet;
+- EPİAŞ ingestion still requires valid credentials unless skipped;
+- if ingestion fails but existing data is available, the pipeline continues and
+  records `PARTIAL_SUCCESS`;
+- day-ahead forecast failure marks the full pipeline `FAILED`.
+
+## Monitoring and Quality Checks
+
+Sprint 11 adds lightweight DB-backed monitoring snapshots for operational demo
+and daily checks. The monitoring layer is read-only except for storing
+snapshots in `monitoring_snapshots`.
+
+It summarizes:
+
+- data freshness from `ptf_hourly`;
+- data quality over the last 30 days from the latest PTF timestamp;
+- latest daily pipeline health;
+- latest day-ahead forecast availability;
+- selected model quality from forecast decision metrics;
+- uncertainty interval quality;
+- latest day-ahead risk distribution.
+
+Create a monitoring snapshot through the API:
+
+```bash
+curl -X POST http://localhost:8000/api/monitoring/ptf/snapshot \
+  -H "Content-Type: application/json" \
+  -d '{"max_ptf_age_hours": 168, "expected_forecast_horizon_hours": 24}'
+```
+
+Check compact monitoring status:
+
+```bash
+curl http://localhost:8000/api/monitoring/ptf/status
+```
+
+Fetch the latest full snapshot:
+
+```bash
+curl http://localhost:8000/api/monitoring/ptf/latest
+```
+
+List recent snapshots:
+
+```bash
+curl http://localhost:8000/api/monitoring/ptf/snapshots
+```
+
+Create a snapshot through the CLI:
+
+```bash
+docker compose exec api python scripts/build_monitoring_snapshot.py
+docker compose exec api python scripts/build_monitoring_snapshot.py \
+  --max-ptf-age-hours 168 \
+  --expected-forecast-horizon-hours 24
+```
+
+Inspect stored snapshots:
+
+```bash
+docker compose exec db sh -c \
+  'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+  -c "SELECT snapshot_id, status, created_at, \
+             data_freshness->>''max_timestamp'' AS latest_ptf, \
+             pipeline_health->>''latest_status'' AS pipeline_status, \
+             forecast_health->>''latest_forecast_run_id'' AS forecast_run_id \
+      FROM monitoring_snapshots ORDER BY created_at DESC LIMIT 10;"'
+```
+
+The dashboard shows the latest monitoring snapshot in the
+"Monitoring & Quality" section:
+
+```text
+http://localhost:8501
+```
+
+Threshold assumptions:
+
+- data freshness defaults to `max_ptf_age_hours=168` for local historical dev;
+- data quality checks the last 30 days relative to the DB max timestamp, not
+  wall-clock time;
+- model quality is healthy when R² is at least `0.75`;
+- uncertainty coverage is healthy between `85%` and `98%`;
+- latest day-ahead forecast risk is warning at 8+ high-risk hours and critical
+  at 16+ high-risk hours.
+
 ## Streamlit Forecast Dashboard
 
 The Streamlit dashboard visualizes the latest production-ready forecast output

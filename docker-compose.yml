@@ -72,6 +72,10 @@ services:
         --dbname "$$POSTGRES_DB" --file /migrations/008_forecast_decision_layer.sql
         && psql --set=ON_ERROR_STOP=1 --username "$$POSTGRES_USER"
         --dbname "$$POSTGRES_DB" --file /migrations/009_day_ahead_forecasts.sql
+        && psql --set=ON_ERROR_STOP=1 --username "$$POSTGRES_USER"
+        --dbname "$$POSTGRES_DB" --file /migrations/010_pipeline_runs.sql
+        && psql --set=ON_ERROR_STOP=1 --username "$$POSTGRES_USER"
+        --dbname "$$POSTGRES_DB" --file /migrations/011_monitoring_snapshots.sql
     depends_on:
       db-init:
         condition: service_completed_successfully
@@ -179,6 +183,32 @@ services:
     depends_on:
       db-init:
         condition: service_completed_successfully
+
+  daily-pipeline-scheduler:
+    build:
+      context: .
+      target: api
+    restart: unless-stopped
+    profiles: ["scheduler"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://pepias:pepias@db:5432/pepias}
+      MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI:-http://mlflow:5000}
+      EPIAS_BASE_URL: ${EPIAS_BASE_URL:-https://seffaflik.epias.com.tr}
+      EPIAS_AUTH_URL: ${EPIAS_AUTH_URL:-https://giris.epias.com.tr}
+      EPIAS_USERNAME: ${EPIAS_USERNAME:-}
+      EPIAS_PASSWORD: ${EPIAS_PASSWORD:-}
+      EPIAS_REQUEST_TIMEOUT: ${EPIAS_REQUEST_TIMEOUT:-30}
+      EPIAS_MAX_RETRIES: ${EPIAS_MAX_RETRIES:-3}
+      EPIAS_PTF_ENDPOINT: ${EPIAS_PTF_ENDPOINT:-/electricity-service/v1/markets/dam/data/mcp}
+      DAILY_PIPELINE_ENABLED: ${DAILY_PIPELINE_ENABLED:-false}
+      DAILY_PIPELINE_RUN_TIME_LOCAL: ${DAILY_PIPELINE_RUN_TIME_LOCAL:-13:00}
+      DAILY_PIPELINE_TIMEZONE: ${DAILY_PIPELINE_TIMEZONE:-Europe/Istanbul}
+    command:
+      - python
+      - scripts/scheduled_daily_forecast_loop.py
+    depends_on:
+      api:
+        condition: service_healthy
 
 volumes:
   postgres_data:
