@@ -21,6 +21,15 @@ venv/
 data/
 artifacts/
 mlruns/
+*.csv
+*.tsv
+*.parquet
+*.feather
+exports/
+
+# Local app caches
+.streamlit/
+.ipynb_checkpoints/
 
 # Editors and operating systems
 .idea/
@@ -31,4 +40,3 @@ Thumbs.db
 # Build outputs
 build/
 dist/
-

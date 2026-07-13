@@ -6,6 +6,29 @@ import plotly.graph_objects as go
 from plotly.express import bar
 
 ISTANBUL_TIMEZONE = ZoneInfo("Europe/Istanbul")
+
+STATUS_LABELS = {
+    "HEALTHY": "Sağlıklı",
+    "WARNING": "Uyarı",
+    "CRITICAL": "Kritik",
+    "SUCCESS": "Başarılı",
+    "FAILED": "Başarısız",
+    "RUNNING": "Çalışıyor",
+}
+RISK_LEVEL_LABELS = {
+    "LOW": "LOW - Düşük",
+    "MEDIUM": "MEDIUM - Orta",
+    "HIGH": "HIGH - Yüksek",
+}
+MONITORING_SECTION_LABELS = {
+    "data_freshness": "Veri güncelliği",
+    "data_quality": "Veri kalitesi",
+    "pipeline_health": "Pipeline sağlığı",
+    "forecast_health": "Tahmin sağlığı",
+    "model_quality": "Model kalitesi",
+    "uncertainty_quality": "Belirsizlik kalitesi",
+    "risk_summary": "Risk dağılımı",
+}
 NUMERIC_DISPLAY_COLUMNS = [
     "selected_prediction",
     "actual",
@@ -15,6 +38,24 @@ NUMERIC_DISPLAY_COLUMNS = [
     "upper_bound_95",
     "interval_width_95",
 ]
+
+
+def translate_status(value: Any) -> str:
+    if value is None or pd.isna(value):
+        return "—"
+    text = str(value)
+    return STATUS_LABELS.get(text, text)
+
+
+def translate_risk_level(value: Any) -> str:
+    if value is None or pd.isna(value):
+        return "—"
+    text = str(value)
+    return RISK_LEVEL_LABELS.get(text, text)
+
+
+def translate_monitoring_section(value: str) -> str:
+    return MONITORING_SECTION_LABELS.get(value, value)
 
 
 def format_metric_value(value: Any, suffix: str = "", decimals: int = 2) -> str:
@@ -52,6 +93,8 @@ def prepare_prediction_table(dataframe: pd.DataFrame) -> pd.DataFrame:
     for column in NUMERIC_DISPLAY_COLUMNS:
         if column in table.columns:
             table[column] = pd.to_numeric(table[column], errors="coerce").round(2)
+    if "risk_level" in table.columns:
+        table["risk_level"] = table["risk_level"].apply(translate_risk_level)
     columns = [
         "timestamp",
         "selected_model",
@@ -62,7 +105,19 @@ def prepare_prediction_table(dataframe: pd.DataFrame) -> pd.DataFrame:
         "upper_bound_95",
         "risk_level",
     ]
-    return table[[column for column in columns if column in table.columns]]
+    table = table[[column for column in columns if column in table.columns]]
+    return table.rename(
+        columns={
+            "timestamp": "Saat",
+            "selected_model": "Seçilen Model",
+            "selected_prediction": "Seçilen Tahmin (PTF)",
+            "actual": "Gerçekleşen PTF",
+            "absolute_error": "Mutlak Hata",
+            "lower_bound_95": "Alt Bant (%95)",
+            "upper_bound_95": "Üst Bant (%95)",
+            "risk_level": "Risk Seviyesi",
+        }
+    )
 
 
 def prepare_day_ahead_table(dataframe: pd.DataFrame) -> pd.DataFrame:
@@ -79,6 +134,8 @@ def prepare_day_ahead_table(dataframe: pd.DataFrame) -> pd.DataFrame:
     ]:
         if column in table.columns:
             table[column] = pd.to_numeric(table[column], errors="coerce").round(2)
+    if "risk_level" in table.columns:
+        table["risk_level"] = table["risk_level"].apply(translate_risk_level)
     columns = [
         "horizon_hour",
         "timestamp",
@@ -89,7 +146,19 @@ def prepare_day_ahead_table(dataframe: pd.DataFrame) -> pd.DataFrame:
         "risk_level",
         "selected_model",
     ]
-    return table[[column for column in columns if column in table.columns]]
+    table = table[[column for column in columns if column in table.columns]]
+    return table.rename(
+        columns={
+            "horizon_hour": "Saat İleri",
+            "timestamp": "Teslimat Saati",
+            "forecast_ptf": "PTF Tahmini",
+            "lower_bound_95": "Alt Bant (%95)",
+            "upper_bound_95": "Üst Bant (%95)",
+            "interval_width_95": "Bant Genişliği",
+            "risk_level": "Risk Seviyesi",
+            "selected_model": "Seçilen Model",
+        }
+    )
 
 
 def create_day_ahead_forecast_figure(dataframe: pd.DataFrame) -> go.Figure:
@@ -108,7 +177,7 @@ def create_day_ahead_forecast_figure(dataframe: pd.DataFrame) -> go.Figure:
             y=chart_frame["upper_bound_95"],
             mode="lines",
             line={"width": 0},
-            name="Upper 95%",
+            name="Üst bant (%95)",
             hoverinfo="skip",
             showlegend=False,
         )
@@ -121,7 +190,7 @@ def create_day_ahead_forecast_figure(dataframe: pd.DataFrame) -> go.Figure:
             fill="tonexty",
             fillcolor="rgba(255, 127, 14, 0.18)",
             line={"width": 0},
-            name="95% confidence interval",
+            name="Güven aralığı (%95)",
         )
     )
     figure.add_trace(
@@ -130,14 +199,14 @@ def create_day_ahead_forecast_figure(dataframe: pd.DataFrame) -> go.Figure:
             y=chart_frame["forecast_ptf"],
             mode="lines+markers",
             line={"color": "#ff7f0e", "width": 2},
-            name="Day-ahead forecast",
+            name="Gün öncesi PTF tahmini",
         )
     )
     figure.update_layout(
         height=420,
         margin={"l": 20, "r": 20, "t": 40, "b": 20},
         hovermode="x unified",
-        xaxis_title="Delivery time (Europe/Istanbul)",
+        xaxis_title="Teslimat saati (Europe/Istanbul)",
         yaxis_title="PTF (TL/MWh)",
         legend={"orientation": "h", "y": 1.08},
     )
@@ -160,7 +229,7 @@ def create_forecast_figure(dataframe: pd.DataFrame) -> go.Figure:
             y=chart_frame["upper_bound_95"],
             mode="lines",
             line={"width": 0},
-            name="Upper 95%",
+            name="Üst bant (%95)",
             hoverinfo="skip",
             showlegend=False,
         )
@@ -173,7 +242,7 @@ def create_forecast_figure(dataframe: pd.DataFrame) -> go.Figure:
             fill="tonexty",
             fillcolor="rgba(65, 105, 225, 0.18)",
             line={"width": 0},
-            name="95% confidence interval",
+            name="Güven aralığı (%95)",
         )
     )
     figure.add_trace(
@@ -182,7 +251,7 @@ def create_forecast_figure(dataframe: pd.DataFrame) -> go.Figure:
             y=chart_frame["actual"],
             mode="lines",
             line={"color": "#1f77b4", "width": 2},
-            name="Actual PTF",
+            name="Gerçekleşen PTF",
         )
     )
     figure.add_trace(
@@ -191,14 +260,14 @@ def create_forecast_figure(dataframe: pd.DataFrame) -> go.Figure:
             y=chart_frame["selected_prediction"],
             mode="lines",
             line={"color": "#ff7f0e", "width": 2},
-            name="Selected forecast",
+            name="Seçilen tahmin",
         )
     )
     figure.update_layout(
         height=520,
         margin={"l": 20, "r": 20, "t": 40, "b": 20},
         hovermode="x unified",
-        xaxis_title="Delivery time (Europe/Istanbul)",
+        xaxis_title="Teslimat saati (Europe/Istanbul)",
         yaxis_title="PTF (TL/MWh)",
         legend={"orientation": "h", "y": 1.08},
     )
@@ -214,13 +283,17 @@ def create_risk_distribution_figure(dataframe: pd.DataFrame) -> go.Figure:
         .rename_axis("risk_level")
         .reset_index(name="count")
     )
+    counts["risk_label"] = counts["risk_level"].apply(translate_risk_level)
     return bar(
         counts,
-        x="risk_level",
+        x="risk_label",
         y="count",
-        color="risk_level",
-        title="Risk level distribution",
-        category_orders={"risk_level": ["LOW", "MEDIUM", "HIGH"]},
+        color="risk_label",
+        title="Risk seviyesi dağılımı",
+        labels={"risk_label": "Risk Seviyesi", "count": "Saat Sayısı"},
+        category_orders={
+            "risk_label": ["LOW - Düşük", "MEDIUM - Orta", "HIGH - Yüksek"]
+        },
     )
 
 
@@ -234,13 +307,20 @@ def create_risk_error_figure(dataframe: pd.DataFrame) -> go.Figure:
         .mean()
         .sort_values("risk_level")
     )
+    grouped["risk_label"] = grouped["risk_level"].apply(translate_risk_level)
     return bar(
         grouped,
-        x="risk_level",
+        x="risk_label",
         y="absolute_error",
-        color="risk_level",
-        title="Average absolute error by risk level",
-        category_orders={"risk_level": ["LOW", "MEDIUM", "HIGH"]},
+        color="risk_label",
+        title="Risk seviyesine göre ortalama mutlak hata",
+        labels={
+            "risk_label": "Risk Seviyesi",
+            "absolute_error": "Ortalama Mutlak Hata",
+        },
+        category_orders={
+            "risk_label": ["LOW - Düşük", "MEDIUM - Orta", "HIGH - Yüksek"]
+        },
     )
 
 
@@ -254,11 +334,18 @@ def create_interval_width_figure(dataframe: pd.DataFrame) -> go.Figure:
         .mean()
         .sort_values("risk_level")
     )
+    grouped["risk_label"] = grouped["risk_level"].apply(translate_risk_level)
     return bar(
         grouped,
-        x="risk_level",
+        x="risk_label",
         y="interval_width_95",
-        color="risk_level",
-        title="Average 95% interval width by risk level",
-        category_orders={"risk_level": ["LOW", "MEDIUM", "HIGH"]},
+        color="risk_label",
+        title="Risk seviyesine göre ortalama %95 bant genişliği",
+        labels={
+            "risk_label": "Risk Seviyesi",
+            "interval_width_95": "Ortalama Bant Genişliği",
+        },
+        category_orders={
+            "risk_label": ["LOW - Düşük", "MEDIUM - Orta", "HIGH - Yüksek"]
+        },
     )

@@ -6,6 +6,9 @@ from dashboard.components import (
     format_metric_value,
     prepare_prediction_table,
     readable_timestamp,
+    translate_monitoring_section,
+    translate_risk_level,
+    translate_status,
 )
 from dashboard.data_access import build_decision_predictions_query
 
@@ -23,6 +26,17 @@ def test_format_metric_value_handles_nulls_and_numbers() -> None:
     assert format_metric_value(388.9721) == "388.97"
     assert format_metric_value(93.991, suffix="%") == "93.99%"
     assert format_metric_value(4560, decimals=0) == "4,560"
+
+
+def test_turkish_status_and_risk_labels() -> None:
+    assert translate_status("HEALTHY") == "Sağlıklı"
+    assert translate_status("WARNING") == "Uyarı"
+    assert translate_status("CRITICAL") == "Kritik"
+    assert translate_status("SUCCESS") == "Başarılı"
+    assert translate_risk_level("LOW") == "LOW - Düşük"
+    assert translate_risk_level("MEDIUM") == "MEDIUM - Orta"
+    assert translate_risk_level("HIGH") == "HIGH - Yüksek"
+    assert translate_monitoring_section("data_quality") == "Veri kalitesi"
 
 
 def test_readable_timestamp_converts_to_istanbul_time() -> None:
@@ -45,9 +59,10 @@ def test_prepare_prediction_table_rounds_numeric_columns() -> None:
 
     table = prepare_prediction_table(frame)
 
-    assert table.iloc[0]["timestamp"] == "2026-01-01 00:00"
-    assert table.iloc[0]["selected_prediction"] == 2932.17
-    assert table.iloc[0]["absolute_error"] == 32.05
+    assert table.iloc[0]["Saat"] == "2026-01-01 00:00"
+    assert table.iloc[0]["Seçilen Tahmin (PTF)"] == 2932.17
+    assert table.iloc[0]["Mutlak Hata"] == 32.05
+    assert table.iloc[0]["Risk Seviyesi"] == "LOW - Düşük"
 
 
 def test_prediction_query_builder_adds_optional_filters() -> None:
